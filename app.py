@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import accuracy_score, roc_auc_score
@@ -9,15 +11,14 @@ from sklearn.metrics import accuracy_score, roc_auc_score
 st.set_page_config(page_title="ChurnGuard AI", page_icon="🛡️", layout="wide")
 
 # ==========================================
-# SECTION 1: DATA GENERATION & FIXING ENGINE
+# SECTION 1: DATA GENERATION (The Engine)
 # ==========================================
 @st.cache_data
 def get_high_quality_data():
-    """Generates synthetic data with clear patterns for the model to learn."""
+    """Generates synthetic data where EVERY column matters."""
     try:
         df = pd.read_csv('customer_churn_data.csv')
     except FileNotFoundError:
-        st.warning("⚠️ CSV not found. Generating synthetic data...")
         np.random.seed(42)
         n_rows = 1000
         df = pd.DataFrame({
@@ -29,26 +30,37 @@ def get_high_quality_data():
             'Complaints': np.random.randint(0, 10, n_rows)
         })
 
-    # --- LOGIC INJECTION ---
+    # --- INJECT LOGIC ---
     df['Churn_Prob'] = 0.5 
 
-    # Rule 1: Complaints
-    df.loc[df['Complaints'] <= 3, 'Churn_Prob'] = 0.05 
-    df.loc[df['Complaints'] >= 7, 'Churn_Prob'] = 0.95 
+    # 1. Age (Young = Risky)
+    df.loc[df['Age'] < 30, 'Churn_Prob'] += 0.25
+    df.loc[df['Age'] > 55, 'Churn_Prob'] -= 0.20
 
-    # Rule 2: Usage Tie-Breaker
-    middle_mask = (df['Complaints'] > 3) & (df['Complaints'] < 7)
-    df.loc[middle_mask & (df['MonthlyUsageHours'] >= 100), 'Churn_Prob'] = 0.15
-    df.loc[middle_mask & (df['MonthlyUsageHours'] < 100), 'Churn_Prob'] = 0.85
+    # 2. Gender (Male slightly riskier pattern)
+    df.loc[df['Gender'] == 'Male', 'Churn_Prob'] += 0.05
+
+    # 3. Subscription (Premium = Safe)
+    df.loc[df['SubscriptionType'] == 'Premium', 'Churn_Prob'] -= 0.15
+
+    # 4. Usage (High usage = Safe)
+    df.loc[df['MonthlyUsageHours'] > 150, 'Churn_Prob'] -= 0.20
+    df.loc[df['MonthlyUsageHours'] < 20, 'Churn_Prob'] += 0.20
+
+    # 5. Complaints (The Big Driver)
+    df.loc[df['Complaints'] >= 7, 'Churn_Prob'] += 0.40
+    df.loc[df['Complaints'] <= 1, 'Churn_Prob'] -= 0.30
+
+    # 6. Transactions (Active = Safe)
+    df.loc[df['NumTransactions'] > 30, 'Churn_Prob'] -= 0.10
 
     np.random.seed(42)
-    df['Churn'] = np.random.binomial(1, df['Churn_Prob'])
+    df['Churn'] = np.random.binomial(1, df['Churn_Prob'].clip(0,1))
     df = df.drop(columns=['Churn_Prob'])
-    
     return df
 
 # ==========================================
-# SECTION 2: PREPROCESSING & MODELING
+# SECTION 2: MODELING
 # ==========================================
 
 def preprocess_data(df):
@@ -65,65 +77,49 @@ def preprocess_data(df):
     for col in numeric_cols:
         if col in df.columns:
             df[col] = df[col].fillna(df[col].median())
-            
     return df
 
 @st.cache_resource
 def train_model(df):
     processed_df = preprocess_data(df)
-    
     feature_cols = ['Age', 'Gender_Encoded', 'MonthlyUsageHours', 
                    'NumTransactions', 'SubscriptionType_Encoded', 'Complaints']
-    
     X = processed_df[feature_cols]
     y = processed_df['Churn']
-    
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
     
     model = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
     model.fit(X_train, y_train)
-    
     y_pred = model.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
     auc = roc_auc_score(y_test, model.predict_proba(X_test)[:, 1])
-    
-    return model, acc, auc
+    return model, acc, auc, feature_cols
 
 # ==========================================
-# SECTION 3: STRATEGY LOGIC
+# SECTION 3: UI & DASHBOARD
 # ==========================================
 
 def get_strategy(risk):
-    """Returns a recommended action based purely on Churn Probability."""
-    if risk > 0.7:
-        return "🔴 Critical Risk", "Call immediately + Offer 30% Discount"
-    elif risk > 0.4:
-        return "🟡 Moderate Risk", "Send 'New Features' Email + 10% Discount"
-    else:
-        return "🟢 Safe Customer", "No action needed / Ask for Referral"
+    if risk > 0.7: return "🔴 Critical", "Call + 30% Off"
+    elif risk > 0.4: return "🟡 Moderate", "Email + 10% Off"
+    else: return "🟢 Safe", "Ask for Referral"
 
-# ==========================================
-# SECTION 4: USER INTERFACE
-# ==========================================
-
-# 1. Load & Train
+# Load Logic
 df_main = get_high_quality_data()
-model, acc, auc = train_model(df_main)
+model, acc, auc, feature_names = train_model(df_main)
 
-# 2. Sidebar
-st.sidebar.title("⚙️ Controls")
+# Header
+st.title("🛡️ ChurnGuard AI: 360° Analytics")
+st.markdown(f"**System Status:** 🟢 Online | **Accuracy:** `{acc:.1%}`")
+
+# Sidebar
 app_mode = st.sidebar.selectbox("Choose Mode", ["Single Customer Prediction", "Batch File Analysis"])
-
-# 3. Main Header
-st.title("🛡️ ChurnGuard AI")
-st.markdown(f"**System Status:** 🟢 Online | **Model Accuracy:** `{acc:.1%}`")
 
 if app_mode == "Single Customer Prediction":
     st.subheader("👤 Single Customer Analysis")
-    
     col1, col2 = st.columns(2)
     with col1:
-        age = st.slider("Age", 18, 80, 30)
+        age = st.slider("Age", 18, 80, 25)
         gender = st.selectbox("Gender", ["Male", "Female"])
         sub = st.selectbox("Subscription", ["Basic", "Gold", "Premium"])
     with col2:
@@ -132,56 +128,123 @@ if app_mode == "Single Customer Prediction":
         comp = st.slider("Complaints (Last 30 Days)", 0, 10, 2)
         
     if st.button("Predict Risk"):
-        # Prepare Data
         input_data = pd.DataFrame({
             'Age': [age], 'Gender': [gender], 'MonthlyUsageHours': [usage],
             'NumTransactions': [trans], 'SubscriptionType': [sub], 'Complaints': [comp]
         })
-        
-        # Predict
         proc_input = preprocess_data(input_data)
         features = ['Age', 'Gender_Encoded', 'MonthlyUsageHours', 
                    'NumTransactions', 'SubscriptionType_Encoded', 'Complaints']
-        
         prob = model.predict_proba(proc_input[features])[0][1]
         status, action = get_strategy(prob)
         
-        # Display Results
-        st.markdown("---")
         c1, c2 = st.columns(2)
-        c1.metric("Churn Probability", f"{prob:.1%}", delta_color="inverse" if prob > 0.5 else "normal")
-        c2.metric("Risk Level", status)
+        c1.metric("Churn Risk", f"{prob:.1%}", delta_color="inverse" if prob > 0.5 else "normal")
+        c2.metric("Status", status)
+        st.info(f"**Recommended Action:** {action}")
         
-        st.info(f"💡 **Recommended Action:** {action}")
+        # Mini Feature Importance
+        importances = model.feature_importances_
+        feat_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances}).sort_values(by='Importance', ascending=False)
+        st.bar_chart(feat_df.set_index('Feature'))
 
 elif app_mode == "Batch File Analysis":
-    st.subheader("📂 Batch Analysis")
+    st.subheader("📂 Full Population Analytics")
     uploaded_file = st.file_uploader("Upload CSV", type=["csv"])
     
     if uploaded_file:
         batch_df = pd.read_csv(uploaded_file)
-        st.write(f"Analyzing {len(batch_df)} customers...")
+        st.success(f"Loaded {len(batch_df)} records.")
         
         # Predict
         proc_batch = preprocess_data(batch_df)
         features = ['Age', 'Gender_Encoded', 'MonthlyUsageHours', 
                    'NumTransactions', 'SubscriptionType_Encoded', 'Complaints']
-        
         probs = model.predict_proba(proc_batch[features])[:, 1]
         batch_df['Churn_Probability'] = probs
         batch_df['Risk_Label'] = ['High Risk' if p > 0.5 else 'Safe' for p in probs]
         
-        # Stats
-        risk_count = (probs > 0.5).sum()
-        st.metric("High Risk Customers Found", risk_count, delta="Requires Attention", delta_color="inverse")
+        # --- DASHBOARD TABS ---
+        tab1, tab2, tab3, tab4 = st.tabs([
+            "🔍 Input Data Overview", 
+            "🧠 Churn Risk Analysis", 
+            "📊 Feature Importance", 
+            "📋 Prediction Table"
+        ])
         
-        # Show Data
-        def color_risk(val):
-            color = '#ffcdd2' if val == 'High Risk' else '#c8e6c9'
-            return f'background-color: {color}'
+        # TAB 1: UPLOADED DATA ANALYSIS (The New Feature)
+        with tab1:
+            st.markdown("### 📊 Analysis of Uploaded Dataset")
+            st.write("Overview of the customer demographics before prediction.")
             
-        st.dataframe(batch_df.style.applymap(color_risk, subset=['Risk_Label']))
-        
-        # Download
-        csv = batch_df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Results", csv, "churn_predictions.csv", "text/csv")
+            # Row 1: Categorical
+            c1, c2 = st.columns(2)
+            with c1:
+                if 'Gender' in batch_df.columns:
+                    st.write("**Gender Distribution**")
+                    fig, ax = plt.subplots(figsize=(5,3))
+                    batch_df['Gender'].value_counts().plot.pie(autopct='%1.1f%%', colors=['#66b3ff','#ff9999'], ax=ax)
+                    ax.set_ylabel('')
+                    st.pyplot(fig)
+            with c2:
+                if 'SubscriptionType' in batch_df.columns:
+                    st.write("**Subscription Distribution**")
+                    fig, ax = plt.subplots(figsize=(5,3))
+                    sns.countplot(x='SubscriptionType', data=batch_df, palette='viridis', ax=ax)
+                    st.pyplot(fig)
+            
+            # Row 2: Numerical
+            st.markdown("---")
+            st.write("**Numerical Distributions**")
+            c3, c4 = st.columns(2)
+            with c3:
+                st.write("Age Distribution")
+                st.bar_chart(batch_df['Age'].value_counts().sort_index())
+            with c4:
+                st.write("Monthly Usage Distribution")
+                st.line_chart(batch_df['MonthlyUsageHours'])
+                
+            # Summary Stats
+            with st.expander("View Detailed Statistics"):
+                st.write(batch_df.describe())
+
+        # TAB 2: RISK ANALYSIS
+        with tab2:
+            st.markdown("### 🧠 What is driving the Risk?")
+            
+            # Age vs Risk
+            st.write("**1. Churn Risk by Age Group**")
+            batch_df['Age Group'] = pd.cut(batch_df['Age'], bins=[18, 30, 50, 80], labels=['Young (18-30)', 'Mid (31-50)', 'Senior (50+)'])
+            age_risk = batch_df.groupby('Age Group')['Churn_Probability'].mean()
+            st.bar_chart(age_risk)
+            
+            # Complaints vs Risk
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("**2. Impact of Complaints**")
+                fig_c, ax_c = plt.subplots()
+                sns.barplot(x='Complaints', y='Churn_Probability', data=batch_df, palette='Reds', ax=ax_c)
+                st.pyplot(fig_c)
+            with col2:
+                st.write("**3. Impact of Usage**")
+                fig_u, ax_u = plt.subplots()
+                sns.scatterplot(x='MonthlyUsageHours', y='Churn_Probability', hue='Risk_Label', data=batch_df, ax=ax_u)
+                st.pyplot(fig_u)
+
+        # TAB 3: FEATURE IMPORTANCE
+        with tab3:
+            st.markdown("### 🔑 Global Feature Importance")
+            importances = model.feature_importances_
+            feat_df = pd.DataFrame({'Feature': feature_names, 'Importance': importances}).sort_values(by='Importance', ascending=False)
+            
+            fig, ax = plt.subplots(figsize=(8, 4))
+            sns.barplot(x='Importance', y='Feature', data=feat_df, palette='magma', ax=ax)
+            st.pyplot(fig)
+
+        # TAB 4: DATA TABLE
+        with tab4:
+            def highlight_risk(val):
+                return f'background-color: {"#ffcdd2" if val == "High Risk" else "#c8e6c9"}'
+            st.dataframe(batch_df.style.applymap(highlight_risk, subset=['Risk_Label']))
+            csv = batch_df.to_csv(index=False).encode('utf-8')
+            st.download_button("📥 Download Results", csv, "predictions.csv", "text/csv")

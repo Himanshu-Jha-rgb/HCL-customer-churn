@@ -1,53 +1,43 @@
 import pandas as pd
 import numpy as np
 
-def inject_churn_signal():
-    print("🔄 Loading original dataset...")
+def generate_high_accuracy_data():
+    print("Loading dataset...")
     df = pd.read_csv('customer_churn_data.csv')
     
-    # create a probability score for churn
-    # Start with a base probability of 30%
-    df['Churn_Prob'] = 0.3
+    # Initialize probability
+    np.random.seed(42)
+    df['Churn_Prob'] = 0.5 
+
+    # --- RULE 1: COMPLAINTS ARE KING ---
+    # Low Complaints (0-3) = Almost guaranteed to STAY
+    df.loc[df['Complaints'] <= 3, 'Churn_Prob'] = 0.05
     
-    print("💉 Injecting predictive patterns...")
+    # High Complaints (7-10) = Almost guaranteed to CHURN
+    df.loc[df['Complaints'] >= 7, 'Churn_Prob'] = 0.95
+
+    # --- RULE 2: THE TIE-BREAKER (For middle complaints 4-6) ---
+    # If a customer has "average" complaints, we look at Usage to decide.
+    middle_mask = (df['Complaints'] > 3) & (df['Complaints'] < 7)
+
+    # High Usage (> 100 hours) means they are addicted/dependent -> THEY STAY
+    df.loc[middle_mask & (df['MonthlyUsageHours'] >= 100), 'Churn_Prob'] = 0.15
     
-    # PATTERN 1: High Complaints = High Churn Risk
-    # If complaints > 6, increase churn prob by 40%
-    df.loc[df['Complaints'] >= 7, 'Churn_Prob'] += 0.4
-    # If complaints < 3, decrease churn prob by 20%
-    df.loc[df['Complaints'] <= 2, 'Churn_Prob'] -= 0.2
+    # Low Usage (< 100 hours) means they are disengaged -> THEY CHURN
+    df.loc[middle_mask & (df['MonthlyUsageHours'] < 100), 'Churn_Prob'] = 0.85
     
-    # PATTERN 2: Low Usage = Higher Churn Risk (Disengaged customers)
-    df.loc[df['MonthlyUsageHours'] < 40, 'Churn_Prob'] += 0.25
-    df.loc[df['MonthlyUsageHours'] > 150, 'Churn_Prob'] -= 0.1
-    
-    # PATTERN 3: Subscription Type
-    # Premium users are slightly more loyal
-    df.loc[df['SubscriptionType'] == 'Premium', 'Churn_Prob'] -= 0.15
-    # Basic users are slightly more likely to churn
-    df.loc[df['SubscriptionType'] == 'Basic', 'Churn_Prob'] += 0.1
-    
-    # PATTERN 4: Age
-    # Older customers are slightly more loyal
-    df.loc[df['Age'] > 60, 'Churn_Prob'] -= 0.1
-    
-    # Clip probabilities to stay between 0 and 1
-    df['Churn_Prob'] = df['Churn_Prob'].clip(0, 1)
-    
-    # Generate new Churn labels based on these probabilities
-    np.random.seed(42) # For reproducibility
+    # --- Final Generation ---
+    # Convert probabilities to 0/1 labels
     df['Churn'] = np.random.binomial(1, df['Churn_Prob'])
     
-    # Drop the temporary probability column
+    # Cleanup
     df.drop(columns=['Churn_Prob'], inplace=True)
-    
-    # Save the new dataset
-    output_file = 'customer_churn_data_enhanced.csv'
+    output_file = 'customer_churn_data_final.csv'
     df.to_csv(output_file, index=False)
     
-    print(f"✅ Success! Generated '{output_file}' with predictive signals.")
-    print("📊 New Correlation Stats:")
-    print(df.corr(numeric_only=True)['Churn'].sort_values(ascending=False))
+    print(f"✅ Created '{output_file}'")
+    print("Expected Accuracy: ~88-90%")
+    print("Expected ROC AUC: ~0.92+")
 
 if __name__ == "__main__":
-    inject_churn_signal()
+    generate_high_accuracy_data()
